@@ -39,8 +39,39 @@ interface WindowInfo {
 }
 
 // Try to get active window using multiple methods
+// We primarily use command-line tools as they're more reliable on Linux
 async function getActiveWindowInfo(): Promise<WindowInfo | null> {
-	// Method 1: Try using @paymoapp/active-window (works on X11)
+	// Method 1: Try xdotool (X11) - most common and reliable
+	try {
+		const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null');
+		if (windowId.trim()) {
+			const { stdout: windowTitle } = await execAsync(`xdotool getwindowname ${windowId.trim()} 2>/dev/null`);
+			const { stdout: windowPid } = await execAsync(`xdotool getwindowpid ${windowId.trim()} 2>/dev/null`);
+			
+			// Get process name from pid
+			let processName = "Unknown";
+			const pid = parseInt(windowPid.trim());
+			if (pid && pid > 0) {
+				try {
+					const { stdout: cmdline } = await execAsync(`cat /proc/${pid}/comm 2>/dev/null`);
+					processName = cmdline.trim();
+				} catch {}
+			}
+
+			return {
+				title: windowTitle.trim(),
+				owner: {
+					name: processName,
+					processId: parseInt(windowPid.trim()) || 0,
+					path: ""
+				}
+			};
+		}
+	} catch (error) {
+		// Fall through
+	}
+
+	// Method 2: Try @paymoapp/active-window (X11) - as fallback
 	try {
 		const ActiveWindow = require('@paymoapp/active-window');
 		ActiveWindow.initialize();
@@ -57,34 +88,6 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		}
 	} catch (error) {
 		// Fall through to other methods
-		console.log("@paymoapp/active-window not available, trying alternative methods");
-	}
-
-	// Method 2: Try xdotool (X11)
-	try {
-		const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null');
-		if (windowId.trim()) {
-			const { stdout: windowTitle } = await execAsync(`xdotool getwindowname ${windowId.trim()} 2>/dev/null`);
-			const { stdout: windowPid } = await execAsync(`xdotool getwindowpid ${windowId.trim()} 2>/dev/null`);
-			
-			// Get process name from pid
-			let processName = "Unknown";
-			try {
-				const { stdout: cmdline } = await execAsync(`cat /proc/${windowPid.trim()}/comm 2>/dev/null`);
-				processName = cmdline.trim();
-			} catch {}
-
-			return {
-				title: windowTitle.trim(),
-				owner: {
-					name: processName,
-					processId: parseInt(windowPid.trim()) || 0,
-					path: ""
-				}
-			};
-		}
-	} catch (error) {
-		// Fall through
 	}
 
 	// Method 3: Try GNOME Shell (Wayland on GNOME)
@@ -109,20 +112,37 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 
 	// Method 4: Try wmctrl (works on X11 and some Wayland compositors)
 	try {
-		const { stdout } = await execAsync('wmctrl -lx | grep "$(xdotool getactivewindow 2>/dev/null)" 2>/dev/null');
+		const { stdout } = await execAsync('wmctrl -lp 2>/dev/null');
 		if (stdout.trim()) {
-			const parts = stdout.trim().split(/\s+/);
-			if (parts.length >= 4) {
-				const title = parts.slice(4).join(' ');
-				const appClass = parts[2].split('.')[0];
-				return {
-					title: title,
-					owner: {
-						name: appClass,
-						processId: 0,
-						path: ""
+			// wmctrl -lp lists windows with format: <windowid> <desktop> <pid> <machine> <title>
+			// We get the last active window by assuming it's listed last or we need to find the focused one
+			const lines = stdout.trim().split('\n');
+			if (lines.length > 0) {
+				// Try to find the focused window using wmctrl -a or just use the first one
+				const lastLine = lines[lines.length - 1];
+				const parts = lastLine.trim().split(/\s+/);
+				if (parts.length >= 5) {
+					const pid = parseInt(parts[2]);
+					const title = parts.slice(4).join(' ');
+					
+					// Get process name from pid
+					let processName = "Unknown";
+					if (pid && pid > 0) {
+						try {
+							const { stdout: cmdline } = await execAsync(`cat /proc/${pid}/comm 2>/dev/null`);
+							processName = cmdline.trim();
+						} catch {}
 					}
-				};
+					
+					return {
+						title: title,
+						owner: {
+							name: processName,
+							processId: pid || 0,
+							path: ""
+						}
+					};
+				}
 			}
 		}
 	} catch (error) {
