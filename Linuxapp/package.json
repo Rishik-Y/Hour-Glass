@@ -14,7 +14,6 @@
     "dist:linux": "npm run build && electron-builder --linux --x64"
   },
   "dependencies": {
-    "@paymoapp/active-window": "^2.1.2",
     "os-utils": "^0.0.14",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./global.d.ts";
 
 function App() {
   const [activeWindow, setActiveWindow] = useState("Loading...");
@@ -10,7 +11,7 @@ function App() {
       if (windowInfo && windowInfo.title) {
         setActiveWindow(`${windowInfo.owner.name} - ${windowInfo.title}`);
       } else {
-        setActiveWindow("No active window detected");
+        setActiveWindow("No active window detected (Requires X11)");
       }
     }, 100);
 
@@ -22,6 +23,14 @@ function App() {
       <h1>Active Window Tracker (Linux)</h1>
       <p>Currently Active Window:</p>
       <strong>{activeWindow}</strong>
+      <div style={{ marginTop: "20px", fontSize: "14px", color: "#666" }}>
+        <p>📋 Requirements:</p>
+        <ul>
+          <li>X11 session (not Wayland)</li>
+          <li>xdotool installed</li>
+        </ul>
+        <p>Run <code>./setup-check.sh</code> to verify your system</p>
+      </div>
     </div>
   );
 }

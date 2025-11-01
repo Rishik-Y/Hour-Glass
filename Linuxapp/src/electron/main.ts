@@ -40,145 +40,87 @@ interface WindowInfo {
 	};
 }
 
-// Try to get active window using multiple methods
-// We primarily use command-line tools as they're more reliable on Linux
-let windowDetectionLogged = false;
+// Detect session type on startup
+let sessionType: string = "unknown";
+let isX11: boolean = false;
 
+function detectSessionType() {
+	sessionType = process.env.XDG_SESSION_TYPE || "unknown";
+	isX11 = sessionType === "x11" || !!(process.env.DISPLAY && !process.env.WAYLAND_DISPLAY);
+
+	console.log("=== Linux Time Tracker - Session Detection ===");
+	console.log("XDG_SESSION_TYPE:", process.env.XDG_SESSION_TYPE);
+	console.log("DISPLAY:", process.env.DISPLAY);
+	console.log("WAYLAND_DISPLAY:", process.env.WAYLAND_DISPLAY);
+	console.log("Detected as X11:", isX11);
+	console.log("==============================================");
+
+	if (!isX11) {
+		console.error("\n⚠️  WARNING: This application requires X11 (X.org) to function properly!");
+		console.error("⚠️  Wayland is NOT supported for window tracking.");
+		console.error("⚠️  Please log out and select 'Plasma (X11)' or 'GNOME on Xorg' session.");
+		console.error("⚠️  The app will run but window tracking will NOT work.\n");
+	}
+}
+
+// Simple and reliable X11 window detection using xdotool
 async function getActiveWindowInfo(): Promise<WindowInfo | null> {
-	// Log once on first call to help debugging
-	if (!windowDetectionLogged) {
-		console.log('Window detection starting...');
-		console.log('Display:', process.env.DISPLAY);
-		console.log('Wayland Display:', process.env.WAYLAND_DISPLAY);
-		console.log('Session Type:', process.env.XDG_SESSION_TYPE);
-		windowDetectionLogged = true;
+	if (!isX11) {
+		return null;
 	}
 
-	// Method 1: Try xdotool (X11) - most common and reliable
 	try {
-		const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null');
-		if (windowId.trim()) {
-			const { stdout: windowTitle } = await execAsync(`xdotool getwindowname ${windowId.trim()} 2>/dev/null`);
-			const { stdout: windowPid } = await execAsync(`xdotool getwindowpid ${windowId.trim()} 2>/dev/null`);
-			
-			// Get process name from pid
-			let processName = "Unknown";
-			const pid = parseInt(windowPid.trim());
-			if (pid && pid > 0) {
+		// Get active window ID
+		const { stdout: windowIdRaw } = await execAsync('xdotool getactivewindow 2>/dev/null');
+		const windowId = windowIdRaw.trim();
+
+		if (!windowId) {
+			return null;
+		}
+
+		// Get window title
+		const { stdout: windowTitle } = await execAsync(`xdotool getwindowname ${windowId} 2>/dev/null`);
+
+		// Get window PID
+		const { stdout: windowPidRaw } = await execAsync(`xdotool getwindowpid ${windowId} 2>/dev/null`);
+		const pid = parseInt(windowPidRaw.trim()) || 0;
+
+		// Get process name and path from PID
+		let processName = "Unknown";
+		let processPath = "";
+
+		if (pid > 0) {
+			try {
+				// Get process name
+				const { stdout: commOutput } = await execAsync(`cat /proc/${pid}/comm 2>/dev/null`);
+				processName = commOutput.trim();
+
+				// Get process executable path
 				try {
-					const { stdout: cmdline } = await execAsync(`cat /proc/${pid}/comm 2>/dev/null`);
-					processName = cmdline.trim();
-				} catch {}
-			}
-
-			console.log('✓ xdotool detected:', processName, '-', windowTitle.trim());
-			return {
-				title: windowTitle.trim(),
-				owner: {
-					name: processName,
-					processId: parseInt(windowPid.trim()) || 0,
-					path: ""
+					const { stdout: exeOutput } = await execAsync(`readlink -f /proc/${pid}/exe 2>/dev/null`);
+					processPath = exeOutput.trim();
+				} catch {
+					// If readlink fails, try cmdline
+					processPath = "";
 				}
-			};
-		}
-	} catch (error) {
-		// Fall through
-		console.log('✗ xdotool failed');
-	}
-
-	// Method 2: Try @paymoapp/active-window (X11) - as fallback
-	try {
-		const ActiveWindow = require('@paymoapp/active-window');
-		ActiveWindow.initialize();
-		const result = ActiveWindow.getActiveWindow();
-		if (result && result.title) {
-			console.log('✓ native addon detected:', result.application, '-', result.title);
-			return {
-				title: result.title,
-				owner: {
-					name: result.application || "Unknown",
-					processId: result.pid || 0,
-					path: result.path || ""
-				}
-			};
-		}
-	} catch (error) {
-		// Fall through to other methods
-		const err = error as Error;
-		console.log('✗ native addon failed:', err.message);
-	}
-
-	// Method 3: Try GNOME Shell (Wayland on GNOME)
-	try {
-		const { stdout } = await execAsync(
-			`gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "global.display.focus_window.title" 2>/dev/null`
-		);
-		const match = stdout.match(/"([^"]+)"/);
-		if (match && match[1]) {
-			console.log('✓ GNOME Shell detected:', match[1]);
-			return {
-				title: match[1],
-				owner: {
-					name: "Unknown",
-					processId: 0,
-					path: ""
-				}
-			};
-		}
-	} catch (error) {
-		// Fall through
-		console.log('✗ GNOME Shell method failed');
-	}
-
-	// Method 4: Try wmctrl (works on X11 and some Wayland compositors)
-	try {
-		const { stdout } = await execAsync('wmctrl -lp 2>/dev/null');
-		if (stdout.trim()) {
-			// wmctrl -lp lists windows with format: <windowid> <desktop> <pid> <machine> <title>
-			// We get the last active window by assuming it's listed last or we need to find the focused one
-			const lines = stdout.trim().split('\n');
-			if (lines.length > 0) {
-				// Try to find the focused window using wmctrl -a or just use the first one
-				const lastLine = lines[lines.length - 1];
-				const parts = lastLine.trim().split(/\s+/);
-				if (parts.length >= 5) {
-					const pid = parseInt(parts[2]);
-					const title = parts.slice(4).join(' ');
-					
-					// Get process name from pid
-					let processName = "Unknown";
-					if (pid && pid > 0) {
-						try {
-							const { stdout: cmdline } = await execAsync(`cat /proc/${pid}/comm 2>/dev/null`);
-							processName = cmdline.trim();
-						} catch {}
-					}
-					
-					console.log('✓ wmctrl detected:', processName, '-', title);
-					return {
-						title: title,
-						owner: {
-							name: processName,
-							processId: pid || 0,
-							path: ""
-						}
-					};
-				}
+			} catch {
+				// Process might have ended, use fallback
+				processName = "Unknown";
 			}
 		}
-	} catch (error) {
-		// Fall through
-		console.log('✗ wmctrl failed');
-	}
 
-	// Final log when all methods fail
-	console.warn('⚠ All window detection methods failed');
-	console.warn('⚠ Session type:', process.env.XDG_SESSION_TYPE);
-	console.warn('⚠ This app requires X11 (X.org) for window detection');
-	console.warn('⚠ KDE Wayland is NOT supported - please use X11 session');
-	console.warn('⚠ To switch: Log out → Select "Plasma (X11)" → Log in');
-	
-	return null;
+		return {
+			title: windowTitle.trim(),
+			owner: {
+				name: processName,
+				processId: pid,
+				path: processPath
+			}
+		};
+	} catch {
+		// xdotool failed - likely not installed or not on X11
+		return null;
+	}
 }
 
 interface TimeEntry {
@@ -191,7 +133,6 @@ interface TimeEntry {
 
 // Helper: Convert Date to IST string
 function toISTString(date: Date): string {
-    // IST is UTC+5:30
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(date.getTime() + istOffsetMs);
     const yyyy = istDate.getUTCFullYear();
@@ -205,11 +146,10 @@ function toISTString(date: Date): string {
 
 // Helper: Parse IST string back to Date
 function parseISTString(str: string): Date {
-    // Format: YYYY-MM-DD HH:mm:ss IST
     const match = str.match(/(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) IST/);
-    if (!match) return new Date(str); // fallback
-    const [_, yyyy, mm, dd, hh, min, ss] = match;
-    // Construct UTC date, then subtract IST offset
+    if (!match) return new Date(str);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const [_full, yyyy, mm, dd, hh, min, ss] = match;
     const utcDate = new Date(Date.UTC(
         Number(yyyy),
         Number(mm) - 1,
@@ -218,7 +158,6 @@ function parseISTString(str: string): Date {
         Number(min),
         Number(ss)
     ));
-    // Subtract IST offset to get UTC
     const istOffsetMs = 5.5 * 60 * 60 * 1000;
     return new Date(utcDate.getTime() - istOffsetMs);
 }
@@ -349,8 +288,7 @@ class TimeTracker {
 			this.saveInterval = null;
 		}
 		if (this.currentEntry) {
-			const now = new Date();
-			this.currentEntry.endTime = now;
+			this.currentEntry.endTime = new Date();
 			this.currentEntry.duration = Math.floor((this.currentEntry.endTime.getTime() - this.currentEntry.startTime.getTime()) / 1000);
 			if (this.currentEntry.duration > 2) {
 				this.entries.push(this.currentEntry);
@@ -401,7 +339,14 @@ class TimeTracker {
 ipcMain.handle("getCurrentWindow", async () => {
 	const result = await getActiveWindowInfo();
 	if (result) {
-		return result;
+		return {
+			title: result.title,
+			owner: {
+				name: result.owner.name,
+				processId: result.owner.processId,
+				path: result.owner.path
+			}
+		};
 	}
 	return null;
 });
@@ -448,6 +393,7 @@ ipcMain.handle('TimeTracker:clearEntries', () => {
 });
 
 app.on("ready", () => {
+	detectSessionType();
 	createWindow();
 	setTimeout(() => {
 		tracker.startTracking();
@@ -467,3 +413,4 @@ app.on("activate", () => {
 app.on("before-quit", () => {
 	tracker.stopTracking();
 });
+
