@@ -2,6 +2,49 @@
 
 This is the Linux version of the Hour-Glass time tracking application, designed to work on Linux systems with both X11 and Wayland display servers.
 
+## Quick Start
+
+### System Compatibility Check
+
+Before installing, you can check if your system has all required dependencies:
+```bash
+./check-system.sh
+```
+
+This script will verify:
+- Display server (X11/Wayland)
+- Node.js and npm versions
+- Window detection tools
+- Build tools for native addons
+
+### Installation for Ubuntu/Debian
+
+For most Ubuntu/Debian users:
+```bash
+# Install system dependencies
+sudo apt install xdotool wmctrl build-essential python3
+
+# Install Node.js dependencies
+npm install
+
+# Test the application
+npm run dev
+```
+
+### Installation for Fedora
+
+For Fedora users:
+```bash
+# Install system dependencies
+sudo dnf install xdotool wmctrl gcc-c++ make python3
+
+# Install Node.js dependencies
+npm install
+
+# Test the application
+npm run dev
+```
+
 ## Features
 
 - **Cross-display server support**: Works on both X11 and Wayland
@@ -96,6 +139,34 @@ This command will:
 
 The application window should open and display the currently active window title, updating every 100ms.
 
+### Testing Window Detection
+
+To verify that window tracking is working correctly on your system:
+
+1. **Launch the app**: Run `npm run dev`
+2. **Check the app window**: You should see "Active Window Tracker (Linux)" with the currently active window displayed
+3. **Switch windows**: Switch to different applications (browser, terminal, etc.)
+4. **Verify tracking**: The app should update in real-time to show the new active window
+
+If you see "No active window detected", this means your system configuration needs adjustment (see Troubleshooting below).
+
+### Verifying Data Persistence
+
+1. Run the app for a few minutes while switching between applications
+2. Close the app
+3. Check the data file: `cat ~/.config/linuxapp/time-tracking-data.json`
+4. You should see a JSON file with entries for each window you focused on
+
+### Testing on Different Environments
+
+The app has been designed to work on:
+- **Ubuntu/Debian** with X11 or Wayland
+- **Fedora** with X11 or Wayland
+- **Arch Linux** with X11 or Wayland
+- **GNOME** desktop environment (X11 and Wayland)
+- **KDE Plasma** desktop environment (X11 and Wayland)
+- **Other** X11-based desktop environments
+
 ## Building the Application
 
 To build the application for production:
@@ -170,12 +241,20 @@ This usually means:
 2. Running on Wayland without supported compositor
 3. Insufficient permissions
 
+**Solutions:**
+- **For X11**: Install xdotool and wmctrl: `sudo apt install xdotool wmctrl`
+- **For Wayland/GNOME**: The app should work automatically, but ensure GNOME Shell is running
+- **For Wayland/KDE**: Ensure qttools5-dev-tools is installed for qdbus
+- **Check display server**: Run `echo $XDG_SESSION_TYPE` to verify X11/Wayland
+
 ### Native addon build fails
 
 If `@paymoapp/active-window` fails to build:
 1. Install build tools (see Prerequisites)
 2. The app will fall back to command-line tools
 3. Ensure xdotool is installed as a fallback
+
+**Note:** The native addon is optional. The app works perfectly fine with just command-line tools.
 
 ### Electron fails to start
 
@@ -185,10 +264,26 @@ If `@paymoapp/active-window` fails to build:
 
 ### Wayland detection not working
 
-Wayland support is limited:
-- GNOME: Ensure GNOME Shell is running
-- KDE: Ensure KWin is running
-- Other compositors: May not be supported, consider using XWayland compatibility layer
+Wayland support is limited by compositor design:
+- **GNOME**: Should work automatically via D-Bus
+- **KDE**: Requires qdbus to be installed
+- **Sway/Other compositors**: May not be supported
+- **Workaround**: Use XWayland compatibility layer for X11 apps
+
+### Application crashes on startup
+
+If the app crashes immediately:
+1. Check console output for error messages
+2. Verify all dependencies are installed
+3. Try running in development mode for more detailed logs: `npm run dev`
+4. Check that the Frontend is built: `cd ../Frontend && npm run build`
+
+### Time tracking data not saving
+
+1. Check permissions on user data directory: `ls -la ~/.config/linuxapp/`
+2. Verify disk space is available
+3. Check console logs for save errors
+4. Try manually creating the directory: `mkdir -p ~/.config/linuxapp/`
 
 ## Development Notes
 
@@ -200,13 +295,29 @@ For a more modular system:
 ## Comparison with Windows App
 
 This Linux app mirrors the functionality of the Windows app (`winapp`):
-- Same time tracking logic
-- Same data format (compatible for cross-platform use)
-- Same UI framework (Electron + React)
-- Same auto-start behavior
-- Same data persistence strategy
 
-The main differences are in the window detection methods, which are platform-specific.
+### Similarities
+- ✓ Same time tracking logic
+- ✓ Same data format (compatible for cross-platform use)
+- ✓ Same UI framework (Electron + React)
+- ✓ Same auto-start behavior
+- ✓ Same data persistence strategy (JSON files in user data directory)
+- ✓ Same polling interval (200ms for window detection)
+- ✓ Same save interval (30 seconds for data persistence)
+
+### Differences
+- **Window Detection**: Uses Linux-specific methods instead of Windows APIs
+  - Windows: Uses `active-win` package with Windows APIs
+  - Linux: Uses xdotool, wmctrl, D-Bus interfaces, and native addons
+- **System Requirements**: Requires X11/Wayland tools instead of Windows APIs
+- **Build Output**: Creates AppImage and .deb packages instead of .exe
+- **Installation Path**: Uses `~/.config/linuxapp/` instead of Windows AppData
+
+### Data Compatibility
+The time tracking data format is identical, so you can:
+- Transfer data files between Windows and Linux versions
+- Use the same analysis tools on data from both platforms
+- Aggregate tracking data from multiple systems
 
 ## License
 
