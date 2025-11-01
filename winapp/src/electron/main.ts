@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
-import osUtils from "os-utils";
 import activeWin from 'active-win';
-import { act } from "react";
+import { FileStorageManager } from './fileStorage';
+import * as http from 'http';
 
 
 let mainWindow: BrowserWindow | null = null;
@@ -30,7 +30,7 @@ function createWindow() {
 }
 
 class SystemResourceMonitor {
-  private currentWindow: any | null = null;
+  private currentWindow: { title: string; owner: { name: string } } | null = null;
   private monitorInterval: NodeJS.Timeout | null = null;
 
   public startMonitoring(intervalMs: number = 100) {
@@ -77,11 +77,144 @@ class TimeTracker {
 	private entries: TimeEntry[] = [];
 	private currentEntry: TimeEntry | null = null;
 	private trackingInterval: NodeJS.Timeout | null = null;
+	private syncInterval: NodeJS.Timeout | null = null;
 	private sm: SystemResourceMonitor;
+	private storage: FileStorageManager;
+	private isSyncing: boolean = false;
 
 	constructor(sys:SystemResourceMonitor) {
 		this.sm = sys;
-		console.log(`TimeTracker initialized`);
+		this.storage = new FileStorageManager();
+		console.log(`TimeTracker initialized with storage at: ${this.storage.getFilePath()}`);
+		
+		// Start auto-sync interval (30 seconds)
+		this.startAutoSync();
+	}
+
+	/**
+	 * Check if we have internet connectivity
+	 */
+	private async checkOnlineStatus(): Promise<boolean> {
+		return new Promise((resolve) => {
+			// Try to make a simple HEAD request to a reliable server
+			const options = {
+				method: 'HEAD',
+				host: 'www.google.com',
+				port: 80,
+				path: '/',
+				timeout: 5000
+			};
+
+			const req = http.request(options, (res) => {
+				resolve(res.statusCode === 200 || res.statusCode === 301 || res.statusCode === 302);
+			});
+
+			req.on('error', () => {
+				resolve(false);
+			});
+
+			req.on('timeout', () => {
+				req.destroy();
+				resolve(false);
+			});
+
+			req.end();
+		});
+	}
+
+	/**
+	 * Start auto-sync interval
+	 */
+	private startAutoSync(): void {
+		// Sync every 30 seconds
+		this.syncInterval = setInterval(async () => {
+			await this.autoSync();
+		}, 30000);
+		
+		console.log('Auto-sync started (30 second interval)');
+	}
+
+	/**
+	 * Auto-sync: save to local file and send to server if online
+	 */
+	private async autoSync(): Promise<void> {
+		if (this.isSyncing) {
+			console.log('Sync already in progress, skipping...');
+			return;
+		}
+
+		try {
+			this.isSyncing = true;
+
+			// Save current in-memory entries to local file
+			if (this.entries.length > 0) {
+				await this.storage.appendEntries(this.entries);
+				console.log(`Saved ${this.entries.length} entries to local storage`);
+				this.entries = []; // Clear in-memory entries after saving
+			}
+
+			// Check if online
+			const isOnline = await this.checkOnlineStatus();
+			
+			if (isOnline) {
+				console.log('Online - attempting to sync with server');
+				
+				// Check if there's data in local file
+				const isEmpty = await this.storage.isEmpty();
+				
+				if (!isEmpty) {
+					// Read all entries from local file
+					const allEntries = await this.storage.readEntries();
+					
+					if (allEntries.length > 0) {
+						console.log(`Found ${allEntries.length} entries to sync to server`);
+						
+						// Send to server
+						const success = await this.sendToServer(allEntries);
+						
+						if (success) {
+							// Clear local file after successful upload
+							await this.storage.clearFile();
+							console.log('Successfully synced to server and cleared local storage');
+						} else {
+							console.log('Failed to sync to server, keeping local data');
+						}
+					}
+				}
+			} else {
+				console.log('Offline - data saved to local storage only');
+			}
+		} catch (error) {
+			console.error('Error during auto-sync:', error);
+		} finally {
+			this.isSyncing = false;
+		}
+	}
+
+	/**
+	 * Send entries to server (placeholder - implement actual server logic)
+	 */
+	private async sendToServer(entries: TimeEntry[]): Promise<boolean> {
+		// TODO: Implement actual server upload logic here
+		// For now, just simulate the behavior
+		console.log(`Sending ${entries.length} entries to server (placeholder)`);
+		
+		try {
+			// Simulate server call
+			// Replace this with actual HTTP request to your server
+			// Example:
+			// const response = await fetch('YOUR_SERVER_URL/api/timeentries', {
+			//   method: 'POST',
+			//   headers: { 'Content-Type': 'application/json' },
+			//   body: JSON.stringify(entries)
+			// });
+			// return response.ok;
+			
+			return true; // Simulate success for now
+		} catch (error) {
+			console.error('Error sending to server:', error);
+			return false;
+		}
 	}
 
 	public startTracking(intervalMs: number = 200) {
@@ -132,22 +265,65 @@ class TimeTracker {
 			}
 		}, intervalMs);
 	}
-	public sendTrackingData() {
-		// Implement sending to server logic here
+
+	/**
+	 * Manually send tracking data to server
+	 */
+	public async sendTrackingData(): Promise<void> {
+		await this.autoSync();
 	}
-	public saveTrackingData() {
-		// Implement cache logic here 
+
+	/**
+	 * Manually save tracking data to local file
+	 */
+	public async saveTrackingData(): Promise<void> {
+		if (this.entries.length > 0) {
+			await this.storage.appendEntries(this.entries);
+			console.log(`Manually saved ${this.entries.length} entries to local storage`);
+			this.entries = [];
+		}
 	}
+
+	/**
+	 * Check if local storage file is empty
+	 */
+	public async isStorageEmpty(): Promise<boolean> {
+		return await this.storage.isEmpty();
+	}
+
+	/**
+	 * Read all entries from local storage
+	 */
+	public async readStoredEntries(): Promise<TimeEntry[]> {
+		return await this.storage.readEntries();
+	}
+
+	/**
+	 * Clear local storage file
+	 */
+	public async clearStorage(): Promise<void> {
+		await this.storage.clearFile();
+	}
+
 	public stopTracking() {
 		if (this.trackingInterval) {
 			clearInterval(this.trackingInterval);
 			this.trackingInterval = null;
 		}
+		if (this.syncInterval) {
+			clearInterval(this.syncInterval);
+			this.syncInterval = null;
+		}
 		if (this.currentEntry) {
 			this.entries.push(this.currentEntry);
 			this.currentEntry = null;
 		}
+		// Save any remaining entries before stopping
+		if (this.entries.length > 0) {
+			this.saveTrackingData();
+		}
 	}
+
 	public printEntries() {
 		for (const entry of this.entries) {
 			console.log(`${entry.appname} - ${entry.apptitle}: ${entry.startTime.toISOString()} to ${entry.endTime.toISOString()} (${entry.duration} seconds)`);
@@ -180,14 +356,23 @@ ipcMain.handle('TimeTracker:start', () => {
 ipcMain.handle('TimeTracker:stop', () => {
 	tracker.stopTracking();
 });
-ipcMain.handle('TimeTracker:sendData', () => {
-	tracker.sendTrackingData();
+ipcMain.handle('TimeTracker:sendData', async () => {
+	await tracker.sendTrackingData();
 });
-ipcMain.handle('TimeTracker:saveData', () => {
-	tracker.saveTrackingData();
+ipcMain.handle('TimeTracker:saveData', async () => {
+	await tracker.saveTrackingData();
 });
 ipcMain.handle('TimeTracker:printEntries', () => {
 	tracker.printEntries();
+});
+ipcMain.handle('TimeTracker:isStorageEmpty', async () => {
+	return await tracker.isStorageEmpty();
+});
+ipcMain.handle('TimeTracker:readStoredEntries', async () => {
+	return await tracker.readStoredEntries();
+});
+ipcMain.handle('TimeTracker:clearStorage', async () => {
+	await tracker.clearStorage();
 });
 
 app.on("ready", createWindow);
