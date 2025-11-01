@@ -5,10 +5,11 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "transpile:electron": "tsc -p src/electron/tsconfig.json",
-    "dev:react": "cd ../Frontend && npm start",
+    "dev:react": "vite",
     "dev:electron": "npm run transpile:electron && cross-env NODE_ENV=development electron .",
     "dev": "npm-run-all --parallel dev:react dev:electron",
-    "build": "cd ../Frontend && npm run build && npm run transpile:electron",
+    "build:react": "vite build",
+    "build": "npm run build:react && npm run transpile:electron",
     "start": "cross-env NODE_ENV=production electron .",
     "dist:linux": "npm run build && electron-builder --linux --x64"
   },
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "@types/node": "^24.9.2",
     "@types/os-utils": "^0.0.4",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",

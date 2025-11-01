@@ -1,6 +1,27 @@
 # Linux Application Build Guide
 
-This is the Linux version of the Hour-Glass time tracking application, designed to work on Linux systems with both X11 and Wayland display servers.
+This is the Linux version of the Hour-Glass time tracking application. **Requires X11 (X.org) display server.**
+
+## ⚠️ IMPORTANT: X11 Required
+
+**This application requires X11 (X.org) to function properly.**
+
+- ✅ **X11 (X.org)**: Fully supported
+- ❌ **KDE Plasma Wayland**: NOT supported
+- ⚠️ **GNOME Wayland**: May work (untested)
+
+### For KDE Plasma Users on Wayland
+
+You MUST switch to X11 session:
+1. Log out of your current session
+2. At the login screen, look for a session selector (usually bottom-left or gear icon)
+3. Select **"Plasma (X11)"** instead of "Plasma (Wayland)"
+4. Log in
+5. Run the app - it will now work!
+
+### Why X11 Only?
+
+Wayland's security model prevents applications from detecting active windows. This is a Wayland design choice, not an app limitation. KDE Plasma on Wayland does not expose the necessary APIs for window tracking.
 
 ## Quick Start
 
@@ -19,6 +40,8 @@ This script will verify:
 
 ### Installation for Ubuntu/Debian
 
+**Prerequisites**: Must be running X11 session (not Wayland)
+
 For most Ubuntu/Debian users:
 ```bash
 # Install system dependencies
@@ -32,6 +55,8 @@ npm run dev
 ```
 
 ### Installation for Fedora
+
+**Prerequisites**: Must be running X11 session (not Wayland)
 
 For Fedora users:
 ```bash
@@ -47,11 +72,28 @@ npm run dev
 
 ## Features
 
-- **Cross-display server support**: Works on both X11 and Wayland
+- **X11 (X.org) support**: Full window detection and tracking on X11
 - **Active window tracking**: Monitors the currently active application and window title
 - **Time tracking**: Records time spent in each application
 - **Data persistence**: Saves tracking data locally in JSON format
 - **Automatic tracking**: Starts tracking automatically when the app launches
+
+## Display Server Support
+
+### Supported
+- ✅ **X11 (X.org)**: Full support with multiple detection methods
+  - xdotool (primary)
+  - @paymoapp/active-window (fallback)
+  - wmctrl (alternative)
+
+### Partially Supported (Experimental)
+- ⚠️ **GNOME on Wayland**: May work via D-Bus (requires testing)
+
+### Not Supported
+- ❌ **KDE Plasma on Wayland**: Window detection blocked by Wayland security model
+- ❌ **Other Wayland compositors**: Generally not supported
+
+**Recommendation**: Use X11 for reliable window tracking.
 
 ## Display Server Support
 

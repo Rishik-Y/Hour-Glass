@@ -14,11 +14,13 @@ function createWindow() {
 		height: 700,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.js"),
+			nodeIntegration: false,
+			contextIsolation: true,
 		},
 	});
 
 	if (process.env.NODE_ENV === "development") {
-		mainWindow.loadURL("http://localhost:24000");
+		mainWindow.loadURL("http://localhost:5173");
 		mainWindow.webContents.openDevTools();
 	} else {
 		mainWindow.loadFile(path.join(__dirname, "../dist-react/index.html"));
@@ -40,7 +42,18 @@ interface WindowInfo {
 
 // Try to get active window using multiple methods
 // We primarily use command-line tools as they're more reliable on Linux
+let windowDetectionLogged = false;
+
 async function getActiveWindowInfo(): Promise<WindowInfo | null> {
+	// Log once on first call to help debugging
+	if (!windowDetectionLogged) {
+		console.log('Window detection starting...');
+		console.log('Display:', process.env.DISPLAY);
+		console.log('Wayland Display:', process.env.WAYLAND_DISPLAY);
+		console.log('Session Type:', process.env.XDG_SESSION_TYPE);
+		windowDetectionLogged = true;
+	}
+
 	// Method 1: Try xdotool (X11) - most common and reliable
 	try {
 		const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null');
@@ -58,6 +71,7 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 				} catch {}
 			}
 
+			console.log('✓ xdotool detected:', processName, '-', windowTitle.trim());
 			return {
 				title: windowTitle.trim(),
 				owner: {
@@ -69,6 +83,7 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		}
 	} catch (error) {
 		// Fall through
+		console.log('✗ xdotool failed');
 	}
 
 	// Method 2: Try @paymoapp/active-window (X11) - as fallback
@@ -77,6 +92,7 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		ActiveWindow.initialize();
 		const result = ActiveWindow.getActiveWindow();
 		if (result && result.title) {
+			console.log('✓ native addon detected:', result.application, '-', result.title);
 			return {
 				title: result.title,
 				owner: {
@@ -88,6 +104,8 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		}
 	} catch (error) {
 		// Fall through to other methods
+		const err = error as Error;
+		console.log('✗ native addon failed:', err.message);
 	}
 
 	// Method 3: Try GNOME Shell (Wayland on GNOME)
@@ -97,6 +115,7 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		);
 		const match = stdout.match(/"([^"]+)"/);
 		if (match && match[1]) {
+			console.log('✓ GNOME Shell detected:', match[1]);
 			return {
 				title: match[1],
 				owner: {
@@ -108,6 +127,7 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		}
 	} catch (error) {
 		// Fall through
+		console.log('✗ GNOME Shell method failed');
 	}
 
 	// Method 4: Try wmctrl (works on X11 and some Wayland compositors)
@@ -134,6 +154,7 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 						} catch {}
 					}
 					
+					console.log('✓ wmctrl detected:', processName, '-', title);
 					return {
 						title: title,
 						owner: {
@@ -147,27 +168,16 @@ async function getActiveWindowInfo(): Promise<WindowInfo | null> {
 		}
 	} catch (error) {
 		// Fall through
+		console.log('✗ wmctrl failed');
 	}
 
-	// Method 5: Try KDE/KWin (Wayland on KDE)
-	try {
-		const { stdout } = await execAsync(
-			`qdbus org.kde.KWin /KWin org.kde.KWin.activeWindow 2>/dev/null`
-		);
-		if (stdout.trim()) {
-			return {
-				title: stdout.trim(),
-				owner: {
-					name: "Unknown",
-					processId: 0,
-					path: ""
-				}
-			};
-		}
-	} catch (error) {
-		// Fall through
-	}
-
+	// Final log when all methods fail
+	console.warn('⚠ All window detection methods failed');
+	console.warn('⚠ Session type:', process.env.XDG_SESSION_TYPE);
+	console.warn('⚠ This app requires X11 (X.org) for window detection');
+	console.warn('⚠ KDE Wayland is NOT supported - please use X11 session');
+	console.warn('⚠ To switch: Log out → Select "Plasma (X11)" → Log in');
+	
 	return null;
 }
 
