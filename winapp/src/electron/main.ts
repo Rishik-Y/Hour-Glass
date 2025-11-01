@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
 import activeWin from 'active-win';
 import { FileStorageManager } from './fileStorage';
-import * as http from 'http';
+import * as https from 'https';
 
 
 let mainWindow: BrowserWindow | null = null;
@@ -86,9 +86,22 @@ class TimeTracker {
 		this.sm = sys;
 		this.storage = new FileStorageManager();
 		console.log(`TimeTracker initialized with storage at: ${this.storage.getFilePath()}`);
+	}
+
+	/**
+	 * Initialize and start auto-sync
+	 * Call this after tracking starts
+	 */
+	private startAutoSync(): void {
+		if (this.syncInterval) {
+			return; // Already started
+		}
+		// Sync every 30 seconds
+		this.syncInterval = setInterval(async () => {
+			await this.autoSync();
+		}, 30000);
 		
-		// Start auto-sync interval (30 seconds)
-		this.startAutoSync();
+		console.log('Auto-sync started (30 second interval)');
 	}
 
 	/**
@@ -96,16 +109,16 @@ class TimeTracker {
 	 */
 	private async checkOnlineStatus(): Promise<boolean> {
 		return new Promise((resolve) => {
-			// Try to make a simple HEAD request to a reliable server
+			// Use HTTPS for secure connectivity check
 			const options = {
 				method: 'HEAD',
-				host: 'www.google.com',
-				port: 80,
+				hostname: 'www.google.com',
+				port: 443,
 				path: '/',
 				timeout: 5000
 			};
 
-			const req = http.request(options, (res) => {
+			const req = https.request(options, (res) => {
 				resolve(res.statusCode === 200 || res.statusCode === 301 || res.statusCode === 302);
 			});
 
@@ -120,18 +133,6 @@ class TimeTracker {
 
 			req.end();
 		});
-	}
-
-	/**
-	 * Start auto-sync interval
-	 */
-	private startAutoSync(): void {
-		// Sync every 30 seconds
-		this.syncInterval = setInterval(async () => {
-			await this.autoSync();
-		}, 30000);
-		
-		console.log('Auto-sync started (30 second interval)');
 	}
 
 	/**
@@ -219,6 +220,10 @@ class TimeTracker {
 
 	public startTracking(intervalMs: number = 200) {
 		console.log(`TimeTracker started with interval ${intervalMs} ms`);
+		
+		// Start auto-sync when tracking starts
+		this.startAutoSync();
+		
 		this.trackingInterval = setInterval(async () => {
 			const activeWindow = this.sm.getCurrentWindowInfo();
 			const now = new Date();
@@ -305,7 +310,7 @@ class TimeTracker {
 		await this.storage.clearFile();
 	}
 
-	public stopTracking() {
+	public async stopTracking(): Promise<void> {
 		if (this.trackingInterval) {
 			clearInterval(this.trackingInterval);
 			this.trackingInterval = null;
@@ -320,7 +325,7 @@ class TimeTracker {
 		}
 		// Save any remaining entries before stopping
 		if (this.entries.length > 0) {
-			this.saveTrackingData();
+			await this.saveTrackingData();
 		}
 	}
 
@@ -353,8 +358,8 @@ ipcMain.handle("getCurrentWindow:stop", () => {
 ipcMain.handle('TimeTracker:start', () => {
 	tracker.startTracking();
 });
-ipcMain.handle('TimeTracker:stop', () => {
-	tracker.stopTracking();
+ipcMain.handle('TimeTracker:stop', async () => {
+	await tracker.stopTracking();
 });
 ipcMain.handle('TimeTracker:sendData', async () => {
 	await tracker.sendTrackingData();
@@ -377,8 +382,8 @@ ipcMain.handle('TimeTracker:clearStorage', async () => {
 
 app.on("ready", createWindow);
 
-app.on("window-all-closed", () => {
-	tracker.stopTracking();
+app.on("window-all-closed", async () => {
+	await tracker.stopTracking();
 	monitor.stopMonitoring();
 	if (process.platform !== "darwin") app.quit();
 });

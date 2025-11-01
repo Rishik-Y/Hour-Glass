@@ -45,7 +45,15 @@ export class FileStorageManager {
     // Generate new key
     const key = crypto.randomBytes(32);
     try {
-      fs.writeFileSync(keyPath, key, { mode: 0o600 });
+      // Write key file
+      fs.writeFileSync(keyPath, key);
+      // Try to set permissions on Unix-like systems (fails silently on Windows)
+      try {
+        fs.chmodSync(keyPath, 0o600);
+      } catch {
+        // Windows doesn't support chmod, so we ignore the error
+        console.log('File permissions not set (may not be supported on this platform)');
+      }
     } catch (error) {
       console.error('Error writing encryption key:', error);
     }
@@ -59,7 +67,15 @@ export class FileStorageManager {
   private ensureFileExists(): void {
     try {
       if (!fs.existsSync(this.filePath)) {
-        fs.writeFileSync(this.filePath, '', { mode: 0o600 });
+        // Create file
+        fs.writeFileSync(this.filePath, '');
+        // Try to set permissions on Unix-like systems (fails silently on Windows)
+        try {
+          fs.chmodSync(this.filePath, 0o600);
+        } catch {
+          // Windows doesn't support chmod, so we ignore the error
+          console.log('File permissions not set (may not be supported on this platform)');
+        }
       }
     } catch (error) {
       console.error('Error creating storage file:', error);
